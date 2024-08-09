@@ -5,7 +5,7 @@ from app.database_config import get_database_connection #configuracion de bd
 #importaciones complemento
 from app.utils.json_web_token import create_jwt_token
 import bcrypt #encirptacion
-from app.models.users_model import User, UserTerms #modelo para datos de usuario
+from app.models.users_model import User, Userlogin, UserTerms #modelo para datos de usuario
 from datetime import datetime, timezone #modelo de fechas
 
 router = APIRouter()
@@ -46,6 +46,46 @@ def registrar_usuario(user: User):
         )
     except Exception as err:
         print(f"Error: {err}")#depuracion
+        raise HTTPException(status_code=500, detail=f"Database error: {err}")
+    finally:
+        cursor.close()
+        connection.close()
+
+@router.post("/login")
+def iniciar_sesion(login_data: Userlogin):
+    try:
+        connection = get_database_connection()
+        cursor = connection.cursor()
+
+        #buscar el usuario por correo electrónico
+        query = "SELECT id, email, password_hash, full_name, tipo FROM users WHERE email = %s"
+        cursor.execute(query, (login_data.email,))
+        user_record = cursor.fetchone() #extrae solo un resultado
+
+        #si no se encuentra coincidencias
+        if user_record is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Correo o contraseña incorrectos")
+
+        #extraer los datos del usuario
+        user_id, email, hashed_password, full_name, tipo = user_record
+
+        #verificar la contraseña
+        if not bcrypt.checkpw(login_data.password.encode('utf-8'), hashed_password.encode('utf-8')):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Correo o contraseña incorrectos")
+
+        #generar el JWT
+        token = create_jwt_token(user_id, full_name)
+
+        #retornar la respuesta con el token
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "msg": "Inicio de sesión exitoso",
+                "token": token
+            }
+        )
+    except Exception as err:
+        print(f"Error: {err}") #depuración
         raise HTTPException(status_code=500, detail=f"Database error: {err}")
     finally:
         cursor.close()
@@ -133,6 +173,35 @@ def usuario_aceptarTerminos(user_id: int):
             )
     except Exception as err:
         print(f"Error: {err}")  # depuracion
+        raise HTTPException(status_code=500, detail=f"Database error: {err}")
+    finally:
+        cursor.close()
+        connection.close()
+
+#consulta un usuario en particular
+@router.get("/user/{user_id}")
+def get_user_by_id(user_id: int):
+    try:
+        connection = get_database_connection() #conecta a la bd
+        cursor = connection.cursor(dictionary=True) #obtener el resultado como un diccionario
+
+        #consulta SQL para obtener el usuario por ID
+        query = "SELECT id, full_name, email, tipo FROM users WHERE id = %s"
+        cursor.execute(query, (user_id,))
+        user = cursor.fetchone() #selecciona el primer registro
+
+        #si no se encuentra
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        #retorna los datos del usuario
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=user
+        )
+
+    except Exception as err:
+        print(f"Error: {err}")  # Depuración
         raise HTTPException(status_code=500, detail=f"Database error: {err}")
     finally:
         cursor.close()
